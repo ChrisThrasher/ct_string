@@ -1,0 +1,76 @@
+name: CI
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: environment-${{github.ref}}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{matrix.platform.name}} ${{matrix.config.name}}
+    runs-on: ${{matrix.platform.os}}
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+        - { name: Windows MSVC,  os: windows-2025 }
+        - { name: Windows Clang, os: windows-2025, flags: -GNinja -DCMAKE_CXX_COMPILER=clang++ }
+        - { name: Linux GCC,     os: ubuntu-24.04 }
+        - { name: Linux Clang,   os: ubuntu-24.04, flags: -DCMAKE_CXX_COMPILER=clang++ }
+        - { name: macOS Clang,   os: macos-15 }
+        config:
+        - { name: Debug }
+        - { name: Release }
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure
+      run: cmake --preset dev ${{matrix.platform.flags}} -DCMAKE_BUILD_TYPE=${{matrix.config.name}} -DCMAKE_VERBOSE_MAKEFILE=ON
+
+    - name: Build
+      run: cmake --build build --config ${{matrix.config.name}} --target install
+
+    - name: Test
+      run: ctest --test-dir build --build-config ${{matrix.config.name}} --output-on-failure
+
+    - name: Test Install Interface
+      run: |
+        cmake -S tests/install -B tests/install/build -DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/build/install ${{matrix.platform.flags}} -DCMAKE_BUILD_TYPE=${{matrix.config.name}}
+        cmake --build tests/install/build --config ${{matrix.config.name}}
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure
+      run: cmake --preset dev
+
+    - name: Format
+      run: |
+        cmake --build build --target format
+        git diff --exit-code
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure
+      run: cmake --preset dev -DCMAKE_CXX_COMPILER=clang++
+
+    - name: Tidy
+      run: cmake --build build --target tidy
